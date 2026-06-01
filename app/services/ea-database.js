@@ -458,44 +458,41 @@ export default class EaDatabaseService extends Service {
     const [storedValue, storedNotes] = this.#encodeTagValue(value);
     const lookupKey = `${tableName}::${elementId}::${tagName}`;
 
-    // Capture original value now for use in export comments
-    const originalValue = existing
-      ? (existing[schema.valueCol] === NOTE_SENTINEL
+    if (existing) {
+      // Row exists in the database → UPDATE
+      const originalValue =
+        existing[schema.valueCol] === NOTE_SENTINEL
           ? String(existing[schema.notesCol] ?? '').replace(NOTE_PREFIX, '')
-          : (existing[schema.valueCol] ?? ''))
-      : null;
+          : (existing[schema.valueCol] ?? '');
 
-    const edit = existing
-      ? {
-          type: 'update',
-          table: tableName,
-          propertyId: existing.PropertyID,
-          idColumn,
-          elementId,
-          tagName,
-          value,           // human-readable, for display
-          originalValue,   // original value before edit, for export comments
-          storedValue,     // goes in Value / VALUE column
-          storedNotes,     // goes in Notes / NOTES column
-          ...schema,
-        }
-      : {
-          type: 'insert',
-          table: tableName,
-          propertyId: this.#tempId--,  // negative sentinel; excluded from SQL WHERE
-          idColumn,
-          elementId,
-          tagName,
-          value,
-          originalValue: null,
-          storedValue,
-          storedNotes,
-          ...schema,
+      const edit = {
+        type: 'update', table: tableName, propertyId: existing.PropertyID,
+        idColumn, elementId, tagName, value, originalValue, storedValue, storedNotes,
+        ...schema,
+      };
+      this.#edits.set(`update::${tableName}::${existing.PropertyID}`, edit);
+      this.#editLookup.set(lookupKey, edit);
+    } else {
+      // Row does not exist in the database → INSERT.
+      // If we already have a pending INSERT for this (table, elementId, tagName),
+      // update it in-place rather than creating a second entry with a new tempId.
+      const pending = this.#editLookup.get(lookupKey);
+      if (pending) {
+        const updated = { ...pending, value, storedValue, storedNotes };
+        this.#edits.set(`insert::${tableName}::${pending.propertyId}`, updated);
+        this.#editLookup.set(lookupKey, updated);
+      } else {
+        const tempId = this.#tempId--;
+        const edit = {
+          type: 'insert', table: tableName, propertyId: tempId,
+          idColumn, elementId, tagName, value, originalValue: null,
+          storedValue, storedNotes, ...schema,
         };
+        this.#edits.set(`insert::${tableName}::${tempId}`, edit);
+        this.#editLookup.set(lookupKey, edit);
+      }
+    }
 
-    const primaryKey = `${edit.type}::${tableName}::${edit.propertyId}`;
-    this.#edits.set(primaryKey, edit);
-    this.#editLookup.set(lookupKey, edit);
     this._editVersion++;
   }
 
