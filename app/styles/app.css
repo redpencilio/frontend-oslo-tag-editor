@@ -597,6 +597,18 @@
 
 .view-tabs__reset { font-size: 12px; margin: 4px 0; }
 
+.view-tabs__edit-count {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--c-warn);
+  background: var(--c-warn-bg);
+  border: 1px solid #f59e0b;
+  border-radius: 20px;
+  padding: 2px 10px;
+  margin: 0 2px;
+  white-space: nowrap;
+}
+
 /* ── view body ─────────────────────────────────────────────────────────────── */
 .view-body {
   flex: 1;

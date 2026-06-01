@@ -458,6 +458,13 @@ export default class EaDatabaseService extends Service {
     const [storedValue, storedNotes] = this.#encodeTagValue(value);
     const lookupKey = `${tableName}::${elementId}::${tagName}`;
 
+    // Capture original value now for use in export comments
+    const originalValue = existing
+      ? (existing[schema.valueCol] === NOTE_SENTINEL
+          ? String(existing[schema.notesCol] ?? '').replace(NOTE_PREFIX, '')
+          : (existing[schema.valueCol] ?? ''))
+      : null;
+
     const edit = existing
       ? {
           type: 'update',
@@ -466,9 +473,10 @@ export default class EaDatabaseService extends Service {
           idColumn,
           elementId,
           tagName,
-          value,          // human-readable, for display
-          storedValue,    // goes in Value / VALUE column
-          storedNotes,    // goes in Notes / NOTES column
+          value,           // human-readable, for display
+          originalValue,   // original value before edit, for export comments
+          storedValue,     // goes in Value / VALUE column
+          storedNotes,     // goes in Notes / NOTES column
           ...schema,
         }
       : {
@@ -479,6 +487,7 @@ export default class EaDatabaseService extends Service {
           elementId,
           tagName,
           value,
+          originalValue: null,
           storedValue,
           storedNotes,
           ...schema,
@@ -524,48 +533,259 @@ export default class EaDatabaseService extends Service {
    *
    * Returns the script text as a string.
    */
+  /**
+   * Generate a Microsoft Access-compatible SQL patch script for all pending
+   * edits, download it, and return the script text.
+   *
+   * Statement dialect notes:
+   *  - Strings: single-quoted, internal single-quotes doubled ('').
+   *  - Long text (>255 chars) uses the NOTE sentinel so EA stores it in the
+   *    Memo field: Value='NOTE', Notes='NOTE$ea_notes=<actual text>'.
+   *  - PropertyID is an AutoNumber in all three tables; INSERTs omit it.
+   *  - No transactions, no IF EXISTS — Access SQL does not support them.
+   *    Run statements one table at a time and verify with the SELECTs below.
+   */
   save() {
-    const lines = [
-      '-- OSLO Tag Editor — SQL patch script',
-      `-- Generated : ${new Date().toISOString()}`,
-      `-- Source    : ${this.fileName}`,
-      '--',
-      '-- Apply with Sparx EA → Tools → Database Builder → SQL Editor,',
-      '-- or an Access-compatible tool (mdb-tools, msaccess on Linux, etc.).',
-      '-- Strings use single-quote escaping.  Review before applying.',
-      '--',
-      `-- Total changes: ${this.#edits.size}`,
-      '',
-    ];
+    const edits   = [...this.#edits.values()];
+    const updates = edits.filter((e) => e.type === 'update');
+    const inserts = edits.filter((e) => e.type === 'insert');
 
-    for (const edit of this.#edits.values()) {
-      const v = this.#sqlStr(edit.storedValue);
-      const n = this.#sqlStr(edit.storedNotes);
+    const tables = ['t_objectproperties', 't_attributetag', 't_connectortag'];
 
-      if (edit.type === 'update') {
-        lines.push(
-          `UPDATE ${edit.table}` +
-          ` SET ${edit.valueCol} = ${v}, ${edit.notesCol} = ${n}` +
-          ` WHERE PropertyID = ${edit.propertyId};`,
-        );
-      } else {
-        // INSERT — let Access auto-assign PropertyID (omit it)
-        lines.push(
-          `INSERT INTO ${edit.table} (${edit.idColumn}, Property, ${edit.valueCol}, ${edit.notesCol})` +
-          ` VALUES (${edit.elementId}, '${this.#sqlEscape(edit.tagName)}', ${v}, ${n});`,
-        );
+    const now = new Date();
+
+    const L = []; // output lines
+    const line  = (s = '')  => L.push(s);
+    const sep   = ()         => line('-- ' + '-'.repeat(72));
+    const blank = ()         => line('');
+
+    // ── header ────────────────────────────────────────────────────────────────
+    sep();
+    line('-- OSLO Tag Editor — SQL Patch Script');
+    line('-- Microsoft Access (JET) dialect — compatible with Sparx EA 15');
+    sep();
+    line(`-- Generated : ${now.toISOString()}`);
+    line(`-- Source    : ${this.fileName}`);
+    line(`-- Changes   : ${updates.length} UPDATE${updates.length !== 1 ? 's' : ''}, ${inserts.length} INSERT${inserts.length !== 1 ? 's' : ''}`);
+    blank();
+
+    // ── how to apply in EA 15 ─────────────────────────────────────────────────
+    sep();
+    line('-- HOW TO APPLY IN SPARX ENTERPRISE ARCHITECT 15');
+    sep();
+    line('--');
+    line('-- Option A — EA built-in SQL Editor (recommended):');
+    line('--   1. Open your EAP file in Enterprise Architect 15.');
+    line('--   2. Go to: Tools  →  Database Builder');
+    line('--   3. In the Database Builder panel, click the "SQL" tab.');
+    line('--   4. Paste the statements from ONE section below into the editor.');
+    line('--      Run one table at a time; do NOT paste the entire file at once.');
+    line('--   5. Click the green  ▶  Run button.');
+    line('--   6. Confirm the row count shown in the results panel.');
+    line('--   7. Repeat for each section.');
+    line('--   8. Close and re-open any diagrams to see updated tag values.');
+    line('--');
+    line('-- Option B — Microsoft Access (if you have it installed):');
+    line('--   1. Open the .eap file in Access (it is a standard JET/MDB database).');
+    line('--   2. Go to: Create  →  Query Design, switch to SQL View.');
+    line('--   3. Paste and run one section at a time as above.');
+    line('--');
+    line('-- Option C — mdb-tools (Linux / macOS):');
+    line('--   mdb-sql path/to/file.eap < this_script.sql');
+    line('--');
+    line('-- IMPORTANT:');
+    line('--   • Review every statement before running — verify element names');
+    line('--     and tag names match your expectations.');
+    line('--   • Back up your EAP file before applying any changes.');
+    line('--   • EA caches tag values; restart EA after applying if values');
+    line('--     do not appear updated in the UI.');
+    line('--');
+
+    // ── NOTE convention explanation ───────────────────────────────────────────
+    sep();
+    line('-- NOTE CONVENTION');
+    sep();
+    line('--');
+    line('-- Sparx EA stores tag values longer than 255 characters using a two-');
+    line('-- field convention:');
+    line('--   Value = \'NOTE\'');
+    line('--   Notes = \'NOTE$ea_notes=<actual text>\'');
+    line('--');
+    line('-- This script applies that convention automatically for long values.');
+    line('-- Short values clear the Notes field (set to empty string).');
+    line('--');
+
+    // ── summary ───────────────────────────────────────────────────────────────
+    if (edits.length === 0) {
+      line('-- No pending edits — nothing to export.');
+      const script = L.join('\n');
+      this.#download(script, 'oslo-tag-patch');
+      return script;
+    }
+
+    sep();
+    line('-- CHANGE SUMMARY');
+    sep();
+    for (const table of tables) {
+      const u = updates.filter((e) => e.table === table).length;
+      const i = inserts.filter((e) => e.table === table).length;
+      if (u + i > 0) line(`--   ${table.padEnd(22)} ${u} update${u !== 1 ? 's' : ''}, ${i} insert${i !== 1 ? 's' : ''}`);
+    }
+    blank();
+
+    // ── statements, grouped by table then type ────────────────────────────────
+    for (const table of tables) {
+      const tableEdits = edits.filter((e) => e.table === table);
+      if (!tableEdits.length) continue;
+
+      const tableUpdates = tableEdits.filter((e) => e.type === 'update');
+      const tableInserts = tableEdits.filter((e) => e.type === 'insert');
+
+      sep();
+      line(`-- TABLE: ${table}`);
+      sep();
+      blank();
+
+      if (tableUpdates.length) {
+        line(`-- ── UPDATEs (${tableUpdates.length}) ──`);
+        blank();
+        for (const edit of tableUpdates) {
+          const ctx = this.#editContext(edit);
+          line(`-- ${ctx}`);
+          line(`-- Old value : ${this.#truncate(edit.originalValue ?? '(unknown)')}`);
+          line(`-- New value : ${this.#truncate(edit.value)}`);
+          if (edit.storedValue === NOTE_SENTINEL) {
+            line('-- (stored as NOTE sentinel — value exceeds 255 chars)');
+          }
+          line(
+            `UPDATE ${table}` +
+            ` SET ${edit.valueCol} = ${this.#sqlStr(edit.storedValue)},` +
+            ` ${edit.notesCol} = ${this.#sqlStr(edit.storedNotes)}` +
+            ` WHERE PropertyID = ${edit.propertyId};`,
+          );
+          blank();
+        }
+      }
+
+      if (tableInserts.length) {
+        line(`-- ── INSERTs (${tableInserts.length}) ──`);
+        line('-- PropertyID is omitted; Access assigns an AutoNumber automatically.');
+        blank();
+        for (const edit of tableInserts) {
+          const ctx = this.#editContext(edit);
+          line(`-- ${ctx}`);
+          line(`-- Value : ${this.#truncate(edit.value)}`);
+          if (edit.storedValue === NOTE_SENTINEL) {
+            line('-- (stored as NOTE sentinel — value exceeds 255 chars)');
+          }
+          line(
+            `INSERT INTO ${table}` +
+            ` (${edit.idColumn}, Property, ${edit.valueCol}, ${edit.notesCol})` +
+            ` VALUES (${edit.elementId}, ${this.#sqlStr(edit.tagName)},` +
+            ` ${this.#sqlStr(edit.storedValue)}, ${this.#sqlStr(edit.storedNotes)});`,
+          );
+          blank();
+        }
       }
     }
 
-    const script = lines.join('\n');
-    const blob = new Blob([script], { type: 'text/plain' });
-    const a = Object.assign(document.createElement('a'), {
-      href: URL.createObjectURL(blob),
-      download: `oslo-tag-patch-${Date.now()}.sql`,
+    // ── verification SELECTs ──────────────────────────────────────────────────
+    sep();
+    line('-- VERIFICATION');
+    line('-- Run these SELECTs after applying the patch to confirm results.');
+    sep();
+    blank();
+
+    for (const table of tables) {
+      const tableUpdates = updates.filter((e) => e.table === table);
+      const tableInserts = inserts.filter((e) => e.table === table);
+      if (!tableUpdates.length && !tableInserts.length) continue;
+
+      const schema = TAG_SCHEMA[table];
+
+      line(`-- ${table}`);
+
+      if (tableUpdates.length) {
+        const ids = tableUpdates.map((e) => e.propertyId).join(', ');
+        line(
+          `SELECT PropertyID, ${schema.idCol}, Property,` +
+          ` ${schema.valueCol}, ${schema.notesCol}` +
+          ` FROM ${table} WHERE PropertyID IN (${ids});`,
+        );
+      }
+
+      if (tableInserts.length) {
+        // For inserts we don't know the assigned PropertyID; query by element+tag
+        for (const edit of tableInserts) {
+          line(
+            `SELECT PropertyID, ${schema.idCol}, Property,` +
+            ` ${schema.valueCol}, ${schema.notesCol}` +
+            ` FROM ${table}` +
+            ` WHERE ${schema.idCol} = ${edit.elementId}` +
+            ` AND Property = ${this.#sqlStr(edit.tagName)};`,
+          );
+        }
+      }
+
+      blank();
+    }
+
+    sep();
+    line('-- END OF SCRIPT');
+    sep();
+
+    const script = L.join('\n');
+    this.#download(script, 'oslo-tag-patch');
+    return script;
+  }
+
+  /** Trigger a file download. */
+  #download(text, baseName) {
+    const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const blob = new Blob([text], { type: 'text/plain; charset=utf-8' });
+    const a    = Object.assign(document.createElement('a'), {
+      href:     URL.createObjectURL(blob),
+      download: `${baseName}-${ts}.sql`,
     });
     a.click();
     URL.revokeObjectURL(a.href);
-    return script;
+  }
+
+  /** Build a short human-readable description of an edit for use in comments. */
+  #editContext(edit) {
+    // Look up element/attribute/connector name from the in-memory tables
+    let subject = `ID=${edit.elementId}`;
+
+    try {
+      if (edit.table === 't_objectproperties') {
+        const obj = this.#t(TABLE.Object).find((o) => o.Object_ID === edit.elementId);
+        if (obj) subject = `${obj.Object_Type ?? 'Element'} "${obj.Name}"`;
+      } else if (edit.table === 't_attributetag') {
+        const attr = this.#t(TABLE.Attribute).find((a) => a.ID === edit.elementId);
+        if (attr) {
+          const obj = this.#t(TABLE.Object).find((o) => o.Object_ID === attr.Object_ID);
+          subject = obj ? `Attribute "${attr.Name}" on "${obj.Name}"` : `Attribute "${attr.Name}"`;
+        }
+      } else if (edit.table === 't_connectortag') {
+        const conn = this.#t(TABLE.Connector).find((c) => c.Connector_ID === edit.elementId);
+        if (conn) {
+          const src  = this.#t(TABLE.Object).find((o) => o.Object_ID === conn.Start_Object_ID);
+          const dst  = this.#t(TABLE.Object).find((o) => o.Object_ID === conn.End_Object_ID);
+          const name = conn.Name || `${src?.Name ?? '?'} → ${dst?.Name ?? '?'}`;
+          subject = `Connector "${name}"`;
+        }
+      }
+    } catch {
+      // context lookup is best-effort
+    }
+
+    return `${edit.type.toUpperCase()} | ${subject} | tag: ${edit.tagName}`;
+  }
+
+  /** Truncate a string for use inside a comment. */
+  #truncate(s, max = 80) {
+    const str = String(s ?? '');
+    return str.length > max ? str.slice(0, max) + '…' : str;
   }
 
   // ── private helpers ─────────────────────────────────────────────────────────

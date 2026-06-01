@@ -215,12 +215,7 @@ export default class TagEditor extends Component {
             <span class="chip chip--warn">{{this.eaDatabase.editCount}} edits</span>
           {{/if}}
         </div>
-        <div class="editor__actions">
-          {{#if this.hasEdits}}
-            <button class="btn btn--ghost" type="button" {{on "click" this.revertAll}}>Revert all</button>
-            <button class="btn btn--primary" type="button" {{on "click" this.exportEdits}}>Export SQL</button>
-          {{/if}}
-        </div>
+        <div class="editor__actions"></div>
       </header>
 
       <div class="filter-bar">

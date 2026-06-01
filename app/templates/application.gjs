@@ -29,6 +29,8 @@ class Application extends Component {
   @action async onLoad(file)          { await this.eaDatabase.loadFile(file); }
   @action onPackageSelect(packageId)  { this.selectedPackageId = packageId; }
   @action setView(id)                 { this.activeView = id; }
+  @action exportSQL()                 { this.eaDatabase.save(); }
+  @action revertAll()                 { this.eaDatabase.revertAll(); }
 
   @action
   onReset() {
@@ -38,6 +40,9 @@ class Application extends Component {
     this.selectedPackageId    = null;
     this.activeView           = 'all-tags';
   }
+
+  get editCount()  { return this.eaDatabase.editCount; }
+  get hasEdits()   { return this.editCount > 0; }
 
   <template>
     {{pageTitle "OSLO Tag Editor"}}
@@ -77,6 +82,18 @@ class Application extends Component {
                 {{/each}}
 
                 <span class="view-tabs__spacer"></span>
+
+                {{#if this.hasEdits}}
+                  <span class="view-tabs__edit-count" title="Pending edits across all views">
+                    {{this.editCount}} edit{{if (eq this.editCount 1) "" "s"}}
+                  </span>
+                  <button class="btn btn--ghost" type="button"
+                    title="Discard all pending edits"
+                    {{on "click" this.revertAll}}>Revert all</button>
+                  <button class="btn btn--primary" type="button"
+                    title="Download SQL patch script"
+                    {{on "click" this.exportSQL}}>Export SQL</button>
+                {{/if}}
 
                 <button class="btn btn--ghost view-tabs__reset" type="button"
                   {{on "click" this.onReset}}>← New file</button>
