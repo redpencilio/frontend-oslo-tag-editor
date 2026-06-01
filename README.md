@@ -2,6 +2,8 @@
 
 > **Experimental project.** This is a proof-of-concept built to explore browser-side editing of OSLO tagged values stored in Sparx Enterprise Architect EAP files. It is not production software. The majority of the code was generated with [Claude Code](https://claude.ai/code) (Anthropic).
 
+![Screenshot of the OSLO Tag Editor showing the Elements grid view with the package tree on the left, language-grouped tag columns, and the export SQL button in the tab bar](./screenshot.png)
+
 ## What it does
 
 `oslo-tag-editor` is a fully client-side browser tool for inspecting and editing [OSLO](https://data.vlaanderen.be/standaarden/) tagged values in Sparx Enterprise Architect `.eap` / `.mdb` files, without requiring Enterprise Architect to be installed.
