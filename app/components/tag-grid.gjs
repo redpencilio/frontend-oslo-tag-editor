@@ -97,10 +97,18 @@ export default class TagGrid extends Component {
     return parts.join(' ');
   };
 
+  // Validation severity for a cell: 'error' | 'warning' | 'info' | null
+  // Reads from @cellSeverity Map<`${itemId}::${tagName}`, severity>
+  cellValidation = (item, tagName) => {
+    return this.args.cellSeverity?.get(`${item.id}::${tagName}`) ?? null;
+  };
+
   cellClass = (item, tagName) => {
     const parts = ['tg-tag-cell'];
     if (this.isWideField(tagName)) parts.push('tg-tag-cell--wide');
     if (this.isDirty(item, tagName)) parts.push('cell--dirty');
+    const sev = this.cellValidation(item, tagName);
+    if (sev) parts.push(`cell--${sev}`);
     return parts.join(' ');
   };
 

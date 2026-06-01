@@ -18,8 +18,20 @@ const EXTRA_COLUMNS = [
   { label: 'Element', key: 'ElementName' },
 ];
 
+const TABLE = 't_attributetag';
+
 export default class AttributeTagView extends Component {
   @service eaDatabase;
+  @service osloValidator;
+
+  get cellSeverity() {
+    const prefix = `${TABLE}::`;
+    const map = new Map();
+    for (const [key, sev] of this.osloValidator.cellSeverityMap) {
+      if (key.startsWith(prefix)) map.set(key.slice(prefix.length), sev);
+    }
+    return map;
+  }
 
   get elementIds() {
     const pid = this.args.packageId;
@@ -54,6 +66,7 @@ export default class AttributeTagView extends Component {
         @tags={{this.tags}}
         @nameColumn="Attribute"
         @extraColumns={{EXTRA_COLUMNS}}
+        @cellSeverity={{this.cellSeverity}}
         @onTagChanged={{this.onTagChanged}}
       />
     {{else}}

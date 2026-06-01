@@ -285,6 +285,66 @@ export default class EaDatabaseService extends Service {
     }));
   }
 
+  // ── bulk queries (used by the validator) ────────────────────────────────────
+
+  /** All packages as a flat array, with the corresponding t_object.Object_ID joined in. */
+  getAllPackagesFlat() {
+    const pkgs    = this.#t(TABLE.Package);
+    const objects = this.#t(TABLE.Object);
+    const sql = `
+      SELECT p.Package_ID, p.Name, p.Parent_ID, p.ea_guid,
+             obj.Object_ID
+      FROM ? p
+      LEFT JOIN ? obj ON p.ea_guid = obj.ea_guid`;
+    return this.#query(sql, [pkgs, objects]);
+  }
+
+  /** All Class / DataType / Enumeration elements across the whole model. */
+  getAllElements() {
+    const objects  = this.#t(TABLE.Object);
+    const packages = this.#t(TABLE.Package);
+    const sql = `
+      SELECT obj.Object_ID, obj.Object_Type, obj.Name,
+             obj.Package_ID, obj.Stereotype, obj.ea_guid,
+             pkg.Name AS PackageName
+      FROM ? obj
+      LEFT JOIN ? pkg ON obj.Package_ID = pkg.Package_ID
+      WHERE obj.Object_Type IN ('Class', 'DataType', 'Enumeration')`;
+    return this.#query(sql, [objects, packages]);
+  }
+
+  /** All attributes across the whole model. */
+  getAllAttributes() {
+    const attrs   = this.#t(TABLE.Attribute);
+    const objects = this.#t(TABLE.Object);
+    const sql = `
+      SELECT a.ID, a.Object_ID, a.Name, a.Type, a.Scope,
+             a.Stereotype, a.Pos, a.ea_guid,
+             obj.Name AS ElementName, obj.Object_Type AS ElementType,
+             obj.Package_ID AS PackageId
+      FROM ? a
+      INNER JOIN ? obj ON a.Object_ID = obj.Object_ID
+      WHERE obj.Object_Type IN ('Class', 'DataType', 'Enumeration')`;
+    return this.#query(sql, [attrs, objects]);
+  }
+
+  /** All Association / Aggregation / Generalization connectors across the whole model. */
+  getAllConnectors() {
+    const connectors = this.#t(TABLE.Connector);
+    const objects    = this.#t(TABLE.Object);
+    const sql = `
+      SELECT c.Connector_ID, c.Name, c.Connector_Type,
+             c.SourceRole, c.DestRole, c.Start_Object_ID, c.End_Object_ID,
+             c.ea_guid,
+             src.Name AS SourceName, src.Object_Type AS SourceType,
+             dst.Name AS DestName,   dst.Object_Type AS DestType
+      FROM ? c
+      INNER JOIN ? src ON c.Start_Object_ID = src.Object_ID
+      INNER JOIN ? dst ON c.End_Object_ID   = dst.Object_ID
+      WHERE c.Connector_Type IN ('Association', 'Aggregation', 'Generalization')`;
+    return this.#query(sql, [connectors, objects, objects]);
+  }
+
   // ── element queries ─────────────────────────────────────────────────────────
 
   /**

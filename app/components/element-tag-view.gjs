@@ -4,24 +4,23 @@ import { service } from '@ember/service';
 import TagGrid from 'oslo-tag-editor/components/tag-grid';
 import { LanguageDependentTags, LanguageIndependentTags, Languages } from 'oslo-tag-editor/oslo-tags';
 
-// All possible language-dependent columns across all languages.
-// TagGrid will hide the ones whose language isn't active.
 const LANG_COLUMNS = LanguageDependentTags.flatMap((base) =>
   Languages.map((lang) => `${base}-${lang}`),
 );
 
-// Language-independent columns relevant to elements
 const INDEP_COLUMNS = [
   'uri', 'name', 'package', 'parentURI', 'range',
   'status', 'literal', 'ignore', 'ignoreImplicitGeneration', 'ap-codelist',
 ];
 
 const ELEMENT_TAG_COLUMNS = [...LANG_COLUMNS, ...INDEP_COLUMNS];
-
 const EXTRA_COLUMNS = [{ label: 'Type', key: 'Object_Type' }];
+
+const TABLE = 't_objectproperties';
 
 export default class ElementTagView extends Component {
   @service eaDatabase;
+  @service osloValidator;
 
   get items() {
     const pid = this.args.packageId;
@@ -36,9 +35,19 @@ export default class ElementTagView extends Component {
     return this.eaDatabase.getTagsForObjects(ids);
   }
 
+  /** Strip table prefix from the validator's cellSeverityMap for TagGrid consumption. */
+  get cellSeverity() {
+    const prefix = `${TABLE}::`;
+    const map = new Map();
+    for (const [key, sev] of this.osloValidator.cellSeverityMap) {
+      if (key.startsWith(prefix)) map.set(key.slice(prefix.length), sev);
+    }
+    return map;
+  }
+
   @action
   onTagChanged(itemId, tagName, newValue) {
-    this.eaDatabase.upsertTag('t_objectproperties', 'Object_ID', itemId, tagName, newValue);
+    this.eaDatabase.upsertTag(TABLE, 'Object_ID', itemId, tagName, newValue);
   }
 
   <template>
@@ -49,6 +58,7 @@ export default class ElementTagView extends Component {
         @tags={{this.tags}}
         @nameColumn="Element"
         @extraColumns={{EXTRA_COLUMNS}}
+        @cellSeverity={{this.cellSeverity}}
         @onTagChanged={{this.onTagChanged}}
       />
     {{else}}

@@ -12,16 +12,19 @@ import PackageTree from 'oslo-tag-editor/components/package-tree';
 import ElementTagView   from 'oslo-tag-editor/components/element-tag-view';
 import AttributeTagView from 'oslo-tag-editor/components/attribute-tag-view';
 import ConnectorTagView from 'oslo-tag-editor/components/connector-tag-view';
+import ValidationView   from 'oslo-tag-editor/components/validation-view';
 
 const VIEWS = [
   { id: 'all-tags',    label: 'All Tags',    hint: 'All tagged values from t_objectproperties, t_attributetag, t_connectortag' },
   { id: 'elements',    label: 'Elements',    hint: 'OSLO tag grid for Class / DataType / Enumeration' },
   { id: 'attributes',  label: 'Attributes',  hint: 'OSLO tag grid for attributes of elements in the selected package' },
   { id: 'connectors',  label: 'Connectors',  hint: 'OSLO tag grid for Association / Aggregation connectors' },
+  { id: 'validation',  label: 'Validation',  hint: 'Validate the model against OSLO conventions' },
 ];
 
 class Application extends Component {
   @service eaDatabase;
+  @service osloValidator;
 
   @tracked selectedPackageId = null;
   @tracked activeView = 'all-tags';
@@ -39,7 +42,11 @@ class Application extends Component {
     this.eaDatabase.error     = null;
     this.selectedPackageId    = null;
     this.activeView           = 'all-tags';
+    this.osloValidator.reset();
   }
+
+  get validationErrorCount() { return this.osloValidator.errorCount; }
+  get validationIsRun()      { return this.osloValidator.isValidated; }
 
   get editCount()  { return this.eaDatabase.editCount; }
   get hasEdits()   { return this.editCount > 0; }
@@ -78,7 +85,18 @@ class Application extends Component {
                     class="view-tab {{if (eq this.activeView view.id) 'view-tab--active'}}"
                     title={{view.hint}}
                     {{on "click" (fn this.setView view.id)}}
-                  >{{view.label}}</button>
+                  >
+                    {{view.label}}
+                    {{#if (eq view.id "validation")}}
+                      {{#if this.validationIsRun}}
+                        {{#if this.validationErrorCount}}
+                          <span class="tab-err-badge">{{this.validationErrorCount}}</span>
+                        {{else}}
+                          <span class="tab-ok-badge">✓</span>
+                        {{/if}}
+                      {{/if}}
+                    {{/if}}
+                  </button>
                 {{/each}}
 
                 <span class="view-tabs__spacer"></span>
@@ -115,6 +133,10 @@ class Application extends Component {
 
                 {{#if (eq this.activeView "connectors")}}
                   <ConnectorTagView @packageId={{this.selectedPackageId}} />
+                {{/if}}
+
+                {{#if (eq this.activeView "validation")}}
+                  <ValidationView @packageId={{this.selectedPackageId}} />
                 {{/if}}
               </div>
 

@@ -24,8 +24,20 @@ const EXTRA_COLUMNS = [
   { label: 'Dest',   key: 'DestinationName' },
 ];
 
+const TABLE = 't_connectortag';
+
 export default class ConnectorTagView extends Component {
   @service eaDatabase;
+  @service osloValidator;
+
+  get cellSeverity() {
+    const prefix = `${TABLE}::`;
+    const map = new Map();
+    for (const [key, sev] of this.osloValidator.cellSeverityMap) {
+      if (key.startsWith(prefix)) map.set(key.slice(prefix.length), sev);
+    }
+    return map;
+  }
 
   get connectors() {
     const pid = this.args.packageId;
@@ -76,6 +88,7 @@ export default class ConnectorTagView extends Component {
         @tags={{this.tags}}
         @nameColumn="Connector"
         @extraColumns={{EXTRA_COLUMNS}}
+        @cellSeverity={{this.cellSeverity}}
         @onTagChanged={{this.onTagChanged}}
       />
     {{else}}
